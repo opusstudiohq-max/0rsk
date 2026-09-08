@@ -37,6 +37,7 @@ class Rsk::Pipeline
   private
 
   def deadline(completed, schedule)
+    day = completed.to_date
     case schedule
     when 'daily'
       completed + (24 * 60 * 60)
@@ -45,12 +46,11 @@ class Rsk::Pipeline
     when 'biweekly'
       completed + (14 * 24 * 60 * 60)
     when 'monthly'
-      completed + (30 * 24 * 60 * 60)
+      completed + (((day >> 1) - day) * 24 * 60 * 60)
     when 'quarterly'
-      completed + (3 * 30 * 24 * 60 * 60)
+      completed + (((day >> 3) - day) * 24 * 60 * 60)
     when 'annually'
-      date = Date.new(completed.year, completed.month, completed.day) >> 12
-      Time.new(date.year, date.month, date.day, completed.hour, completed.min, completed.sec, completed.utc_offset)
+      completed + (((day >> 12) - day) * 24 * 60 * 60)
     when /^[0-9]{2}-[0-9]{2}-[0-9]{4}$/
       Time.parse(schedule)
     else
