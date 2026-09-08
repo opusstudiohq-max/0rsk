@@ -46,11 +46,11 @@ class Rsk::Pipeline
     when 'biweekly'
       completed + (14 * 24 * 60 * 60)
     when 'monthly'
-      completed + (((day >> 1) - day) * 24 * 60 * 60)
+      completed + (30 * 24 * 60 * 60)
     when 'quarterly'
-      completed + (((day >> 3) - day) * 24 * 60 * 60)
+      completed + (3 * 30 * 24 * 60 * 60)
     when 'annually'
-      completed + (((day >> 12) - day) * 24 * 60 * 60)
+      completed + (12 * 30 * 24 * 60 * 60)
     when /^[0-9]{2}-[0-9]{2}-[0-9]{4}$/
       Time.parse(schedule)
     else
