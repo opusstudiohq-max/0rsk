@@ -21,17 +21,25 @@ class Rsk::Trimmed
     escaped = false
     safe = 0
     line = 0
-    openings = ['[', '(']
-    closings = [[']', '['], [')', '(']]
+    bracket = false
     chars.first(limit).each_with_index do |char, idx|
       if escaped
         escaped = false
+        bracket = false
       elsif char == '\\'
         escaped = true
-      elsif openings.include?(char)
+        bracket = false
+      elsif char == '[' || (char == '(' && bracket)
         stack << char
-      elsif closings.include?([char, stack.last])
+        bracket = false
+      elsif char == ']' && stack.last == '['
         stack.pop
+        bracket = true
+      elsif char == ')' && stack.last == '('
+        stack.pop
+        bracket = false
+      else
+        bracket = false
       end
       next unless stack.empty? && !escaped
       safe = idx + 1
