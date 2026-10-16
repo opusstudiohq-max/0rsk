@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2019-2026 Yegor Bugayenko
 # SPDX-License-Identifier: MIT
 
+require 'date'
 require 'time'
 
 class Rsk::Pipeline
@@ -15,7 +16,7 @@ class Rsk::Pipeline
     @pgsql.exec(
       [
         'SELECT plan.id, plan.completed, plan.schedule,',
-        'SUM(risk.probability * effect.impact) / COUNT(triple.id) AS rank',
+        'SUM(risk.probability * effect.impact)::numeric / COUNT(triple.id) AS rank',
         'FROM plan',
         'JOIN part ON part.id = plan.part',
         'JOIN project ON part.project = project.id',
@@ -48,7 +49,8 @@ class Rsk::Pipeline
     when 'quarterly'
       completed + (3 * 30 * 24 * 60 * 60)
     when 'annually'
-      completed + (12 * 30 * 24 * 60 * 60)
+      date = Date.new(completed.year, completed.month, completed.day) >> 12
+      Time.new(date.year, date.month, date.day, completed.hour, completed.min, completed.sec, completed.utc_offset)
     when /^[0-9]{2}-[0-9]{2}-[0-9]{4}$/
       Time.parse(schedule)
     else

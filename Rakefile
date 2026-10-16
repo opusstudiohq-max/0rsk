@@ -13,8 +13,13 @@ ENV['RACK_ENV'] = 'test'
 task default: %i[clean test eslint rubocop xcop]
 
 require 'rake/testtask'
-Rake::TestTask.new(test: %i[pgsql liquibase]) do |test|
+desc 'Delete the previous report and ask the tests to measure the coverage'
+task :with_coverage do
   Rake::Cleaner.cleanup_files(['coverage'])
+  ENV['PICKS'] = 'yes'
+end
+
+Rake::TestTask.new(test: %i[pgsql liquibase with_coverage]) do |test|
   test.libs << 'lib' << 'test'
   test.pattern = 'test/**/test_*.rb'
   test.verbose = true
@@ -93,7 +98,8 @@ task(seed_dummy: %i[pgsql liquibase]) do
   require_relative 'objects/risks'
   require_relative 'objects/rsk'
   require_relative 'objects/triples'
-  pgsql = Pgtk::Pool.new(Pgtk::Wire::Yaml.new('target/pgsql-config.yml'), log: Loog::NULL).start
+  pgsql = Pgtk::Pool.new(Pgtk::Wire::Yaml.new('target/pgsql-config.yml'), log: Loog::NULL)
+  pgsql.start!
   fixtures = YAML.safe_load_file('liquibase/fixtures.yml')
   fixtures.each do |key, data|
     login = "demo_#{key}"
@@ -111,8 +117,8 @@ task(seed_dummy: %i[pgsql liquibase]) do
       ri = rids[data['risks'].index { |r| r['text'] == p['risk'] }]
       ei = eids[data['effects'].index { |e| e['text'] == p['effect'] }]
       next unless ci && ri && ei
-      tid = triples.add(ci, ri, ei)
-      plans.add(tid, p['text'])
+      triples.add(ci, ri, ei)
+      plans.add(ri, p['text'])
     end
     puts "Seeded: #{data['title']}"
   end

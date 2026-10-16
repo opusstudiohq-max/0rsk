@@ -8,16 +8,18 @@ require_relative '../objects/pipeline'
 require_relative '../objects/postpone'
 require_relative '../objects/tasks'
 
-Rsk::Daemon.new(10).start do
-  users.fetch.each do |login|
-    tasks(login: login).create
+if settings.role.daemons?
+  Rsk::Daemon.new(10).start do
+    users.fetch.each do |login|
+      tasks(login: login).create
+    end
+    @updated = Time.now
   end
-  @updated = Time.now
 end
 
 get '/tasks' do
   offset = [Integer(params[:offset] || '0'), 0].max
-  limit = Integer(params[:limit] || '10')
+  limit = [Integer(params[:limit] || '10'), 1].max
   query = params[:q] || ''
   haml :tasks, layout: :layout, locals: merged(
     title: '/tasks',

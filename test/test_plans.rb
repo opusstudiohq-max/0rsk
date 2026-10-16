@@ -29,6 +29,12 @@ class Rsk::PlansTest < TestCase
     plans.get(id, rid).complete
   end
 
+  def test_refuses_blank_text
+    project = test_project
+    plans = Rsk::Plans.new(test_pgsql, project)
+    assert_raises(Rsk::Urror) { plans.add(test_risk(project: project), '   ') }
+  end
+
   def test_refuses_a_part_of_another_project
     mine = test_project
     theirs = test_project
@@ -40,6 +46,16 @@ class Rsk::PlansTest < TestCase
       "must belong to project ##{mine}"
     )
     assert_equal(0, Rsk::Plans.new(test_pgsql, theirs).count)
+  end
+
+  def test_refuses_a_plan_as_a_part
+    project = test_project
+    plans = Rsk::Plans.new(test_pgsql, project)
+    first = plans.add(test_risk(project: project), 'first plan')
+    assert_raises(Rsk::Urror) do
+      plans.add(first, 'nested plan')
+    end
+    assert_equal(1, plans.count)
   end
 
   def test_refuses_a_plan_of_another_project
@@ -54,6 +70,15 @@ class Rsk::PlansTest < TestCase
       "is not in project ##{mine}"
     )
     assert_equal(1, Rsk::Plans.new(test_pgsql, theirs).count)
+  end
+
+  def test_refuses_a_part_not_linked_to_plan
+    project = test_project
+    plans = Rsk::Plans.new(test_pgsql, project)
+    plan = plans.add(test_risk(project: project), 'we make backups')
+    assert_raises(Rsk::Urror) do
+      plans.get(plan, test_effect(project: project))
+    end
   end
 
   def test_fetch_no_duplicates

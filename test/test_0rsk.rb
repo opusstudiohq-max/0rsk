@@ -32,6 +32,20 @@ class Rsk::AppTest < TestCase
     Sinatra::Application
   end
 
+  def test_survives_github_being_unreachable
+    fake = Object.new
+    fake.define_singleton_method(:user) { |_| raise(SocketError, 'getaddrinfo: temporary failure') }
+    fake.define_singleton_method(:login_uri) { 'https://example.com/login' }
+    before = Sinatra::Application.settings.glogin
+    Sinatra::Application.set(:glogin, fake)
+    begin
+      get('/github-callback?code=abc')
+      assert_equal(302, last_response.status, last_response.body)
+    ensure
+      Sinatra::Application.set(:glogin, before)
+    end
+  end
+
   def test_renders_pages
     pages = ['/version', '/robots.txt', '/', '/js/triple.js', '/js/responses.js', '/terms']
     pages.each do |p|
@@ -95,6 +109,22 @@ class Rsk::AppTest < TestCase
     end
   end
 
+  def test_reads_leading_zero_id_as_decimal
+    tid = test_triple(project: login)
+    ["/responses?id=0#{tid}", "/triple?id=00#{tid}"].each do |p|
+      get(p)
+      assert_equal(200, last_response.status, "#{p} fails: #{last_response.body}")
+    end
+  end
+
+  def test_renders_paginated_pages_with_negative_limit
+    login
+    ['/ranked', '/tasks', '/causes', '/risks', '/effects', '/plans'].each do |p|
+      get("#{p}?limit=-1")
+      assert_equal(200, last_response.status, "#{p} fails: #{last_response.body}")
+    end
+  end
+
   def test_add
     login("jeff09#{rand(99_999)}")
     post(
@@ -114,6 +144,13 @@ class Rsk::AppTest < TestCase
     assert_equal(302, last_response.status, last_response.body)
     get('/ranked')
     assert_equal(200, last_response.status, last_response.body)
+  end
+
+  def test_rejects_blank_triple_part_names
+    login("blank#{rand(99_999)}")
+    post('/triple/save?ctext=&rtext=test+risk&etext=test+effect&emoji=A&cid=&rid=&eid=&probability=5&impact=5')
+    assert_equal(302, last_response.status, last_response.body)
+    assert_includes(last_response.headers['Set-Cookie'], 'flash_msg=The+cause+name+can%27t+be+empty')
   end
 
   def test_export_csv_and_json
@@ -173,6 +210,16 @@ class Rsk::AppTest < TestCase
     %w[/tasks/done?id=1 /tasks/later?id=1&period=week /tasks/create /projects/select?id=1].each do |uri|
       get(uri)
       assert_equal(404, last_response.status, uri)
+    end
+  end
+
+  def test_ignores_the_glogin_param_outside_the_tests
+    app.set(:environment, :development)
+    begin
+      get('/?glogin=bob', {}, 'HTTP_HOST' => 'localhost')
+      refute_includes(last_response.headers['Set-Cookie'].to_s, 'glogin=bob')
+    ensure
+      app.set(:environment, :test)
     end
   end
 

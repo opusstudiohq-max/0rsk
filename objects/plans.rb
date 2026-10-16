@@ -14,9 +14,13 @@ class Rsk::Plans
   end
 
   def add(part, text)
+    raise(Rsk::Urror, 'Plan text cannot be empty') if text.strip.empty?
     @pgsql.transaction do |t|
       if t.exec('SELECT id FROM part WHERE id = $1 AND project = $2', [part, @project]).empty?
         raise(Rsk::Urror, "Part ##{part} must belong to project ##{@project}")
+      end
+      if t.exec("SELECT id FROM part WHERE id = $1 AND type IN ('Cause', 'Risk', 'Effect')", [part]).empty?
+        raise(Rsk::Urror, "Part ##{part} must be a cause, risk, or effect in project ##{@project}")
       end
       id = Integer(
         t.exec(
@@ -27,12 +31,16 @@ class Rsk::Plans
       t.exec('INSERT INTO plan (id, part) VALUES ($1, $2)', [id, part])
       id
     end
+  rescue PG::UniqueViolation
+    raise(Rsk::Urror, "Plan \"#{text}\" already exists in this project")
   end
 
   def get(id, part, con: nil)
     require_relative('plan')
     if (con || @pgsql).exec(
-      'SELECT id FROM part WHERE id = $1 AND project = $2 AND type = $3', [id, @project, 'Plan']
+      'SELECT plan.id FROM plan JOIN part ON part.id = plan.id ' \
+      'WHERE plan.id = $1 AND plan.part = $2 AND part.project = $3',
+      [id, part, @project]
     ).empty?
       raise(Rsk::Urror, "Plan ##{id} is not in project ##{@project}")
     end
@@ -53,7 +61,7 @@ class Rsk::Plans
         positive: r['positive'] == 't',
         part: Integer(r['pid']),
         rank: Integer(r['rank'] || 0),
-        completed: Time.parse(r['completed']),
+        completed: r['completed'] && Time.parse(r['completed']),
         schedule: r['schedule']
       }
     end

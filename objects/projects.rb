@@ -7,14 +7,20 @@ require_relative 'rsk'
 require_relative 'urror'
 
 class Rsk::Projects
+  MAX = 64
+
   def initialize(pgsql, login)
     @pgsql = pgsql
     @login = login
   end
 
   def add(title)
+    text = title.to_s.strip
+    raise(Rsk::Urror, 'The title of a project can\'t be empty') if text.empty?
+    raise(Rsk::Urror, "The title is longer than #{Rsk::Projects::MAX} characters: #{text.length}") if
+      text.length > Rsk::Projects::MAX
     Integer(
-      @pgsql.exec('INSERT INTO project (login, title) VALUES ($1, $2) RETURNING id', [@login, title])[0]['id'],
+      @pgsql.exec('INSERT INTO project (login, title) VALUES ($1, $2) RETURNING id', [@login, text])[0]['id'],
       10
     )
   rescue PG::UniqueViolation
@@ -27,7 +33,7 @@ class Rsk::Projects
   end
 
   def fetch
-    @pgsql.exec('SELECT * FROM project WHERE login = $1', [@login]).map do |r|
+    @pgsql.exec('SELECT * FROM project WHERE login = $1 ORDER BY id', [@login]).map do |r|
       {
         id: Integer(r['id']),
         title: r['title'],

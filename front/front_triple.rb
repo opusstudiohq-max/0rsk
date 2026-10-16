@@ -77,7 +77,7 @@ end
 
 get '/triple' do
   vars = { title: '/triple', project: pid, emojis: causes.emojis }
-  id = Integer(params[:id] || 0)
+  id = Integer(params[:id] || '0', 10)
   if id.positive?
     triple = triples.fetch(id: id, limit: 1)[0]
     raise(Rsk::Urror, "Triple ##{id} not found") if triple.nil?
@@ -88,11 +88,14 @@ end
 
 post '/triple/save' do
   %i[ctext rtext etext cid rid eid probability impact].each do |name|
-    raise(Rsk::Urror, "The #{name} is missing in the form") if params[name].nil?
+    raise(Rsk::Urror, "The #{name} is missing in the form") unless params[name].is_a?(String)
   end
   ctext = params[:ctext].strip
   rtext = params[:rtext].strip
   etext = params[:etext].strip
+  { cause: ctext, risk: rtext, effect: etext }.each do |type, text|
+    raise(Rsk::Urror, "The #{type} name can't be empty") if text.empty?
+  end
   cid = params[:cid].empty? ? causes.add(ctext) : params[:cid]
   rid = params[:rid].empty? ? risks.add(rtext) : params[:rid]
   eid = params[:eid].empty? ? effects.add(etext) : params[:eid]

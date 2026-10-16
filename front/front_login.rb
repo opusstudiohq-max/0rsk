@@ -8,7 +8,7 @@ before '/*' do
     halt 429, { 'Content-Type' => 'text/plain' }, 'Too many requests'
   end
   @locals = { http_start: Time.now, ver: Rsk::VERSION, login_link: settings.glogin.login_uri, request_ip: request.ip }
-  if params[:glogin] && ENV['RACK_ENV'] != 'production'
+  if params[:glogin] && settings.environment == :test
     response.set_cookie('glogin', params[:glogin])
   end
   if request.cookies['glogin']
@@ -18,19 +18,24 @@ before '/*' do
         settings.config['github']['encryption_secret'],
         context
       ).to_user
-    rescue GLogin::Codec::DecodingError
+    rescue GLogin::Codec::DecodingError, ArgumentError
       response.delete_cookie('glogin')
     end
   end
-  @locals[:tasks_count] = tasks.count if @locals[:user]
 end
 
 get '/github-callback' do
   code = params[:code]
   error(400) if code.nil?
+  begin
+    user = settings.glogin.user(code)
+  rescue SocketError, SystemCallError, OpenSSL::SSL::SSLError, Net::OpenTimeout, Net::ReadTimeout => e
+    settings.log.error("Can't log in via GitHub: #{e.message}")
+    flash('/', 'GitHub could not be reached right now, please try again', color: 'darkred')
+  end
   response.set_cookie(
     :glogin, GLogin::Cookie::Open.new(
-      settings.glogin.user(code),
+      user,
       settings.config['github']['encryption_secret'],
       context
     ).to_s

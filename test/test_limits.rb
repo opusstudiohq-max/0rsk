@@ -8,6 +8,12 @@ require_relative 'test__helper'
 require_relative '../objects/limits'
 
 class Rsk::LimitsTest < TestCase
+  def test_refuses_invalid_configuration
+    assert_raises(Rsk::Urror) { Rsk::Limits.new(max: 0) }
+    assert_raises(Rsk::Urror) { Rsk::Limits.new(max: -1) }
+    assert_raises(Rsk::Urror) { Rsk::Limits.new(period: -1) }
+  end
+
   def test_counts_per_client
     limits = Rsk::Limits.new(max: 3)
     3.times { refute(limits.over?('1.1.1.1')) }
@@ -21,6 +27,14 @@ class Rsk::LimitsTest < TestCase
     2.times { limits.over?('1.1.1.1', now: now) }
     assert(limits.over?('1.1.1.1', now: now))
     refute(limits.over?('1.1.1.1', now: now + 61))
+  end
+
+  def test_forgets_a_refused_request
+    limits = Rsk::Limits.new(max: 2, period: 60)
+    now = Time.now.to_i
+    2.times { limits.over?('1.1.1.1', now: now) }
+    5.times { assert(limits.over?('1.1.1.1', now: now + 30), 'must be over the limit') }
+    refute(limits.over?('1.1.1.1', now: now + 61), 'a refused request must not keep the client blocked')
   end
 
   def test_survives_concurrent_hits

@@ -21,6 +21,7 @@ require 'telebot'
 require 'time'
 require 'yaml'
 require_relative 'objects/limits'
+require_relative 'objects/role'
 require_relative 'objects/urror'
 require_relative 'version'
 
@@ -31,9 +32,10 @@ end
 
 configure do
   set :haml, format: :xhtml, escape_html: false
+  set :role, Rsk::Role.new
   config = { 'github' => { 'client_id' => '?', 'client_secret' => '?', 'encryption_secret' => '' }, 'sentry' => '' }
   cfg = File.join(File.dirname(__FILE__), 'config.yml')
-  if File.exist?(cfg)
+  if File.file?(cfg)
     loaded = YAML.safe_load(File.open(cfg))
     config.merge!(loaded) if loaded.is_a?(Hash)
   end
@@ -72,7 +74,7 @@ end
 
 get '/ranked' do
   offset = [Integer(params[:offset] || '0'), 0].max
-  limit = Integer(params[:limit] || '10')
+  limit = [Integer(params[:limit] || '10'), 1].max
   query = params[:q] || ''
   haml :ranked, layout: :layout, locals: merged(
     title: '/ranked',
@@ -123,7 +125,7 @@ end
 post '/project/{id}/tracker/add' do
   pid = params[:id]
   raise Rsk::Urror, "Project ##{pid} not found" unless projects.exists?(pid)
-  trackers(pid: pid).add(params[:repo], params[:token])
+  trackers(pid: pid).add(params[:type], params[:repo], params[:token])
   flash("/project/#{pid}", 'Tracker added')
 end
 
@@ -136,7 +138,7 @@ post '/project/{id}/tracker/delete' do
 end
 
 get '/responses' do
-  id = Integer(params[:id])
+  id = Integer(params[:id], 10)
   triple = triples.fetch(id: id, limit: 1)[0]
   raise(Rsk::Urror, "Triple ##{id} not found") if triple.nil?
   haml :responses, layout: :layout, locals: merged(
@@ -147,24 +149,24 @@ get '/responses' do
 end
 
 post '/responses/add' do
-  id = Integer(params[:id])
-  part = Integer(params[:strategy])
+  id = Integer(params[:id], 10)
+  part = Integer(params[:strategy], 10)
   pid = plans.add(part, params[:plan])
   plans.get(pid, part).reschedule(params[:schedule].strip)
   flash("/responses?id=#{id}", "Thanks, plan ##{pid}/#{part} added to the triple ##{id}")
 end
 
 post '/responses/detach' do
-  tid = Integer(params[:tid])
-  id = Integer(params[:id])
-  part = Integer(params[:part])
+  tid = Integer(params[:tid], 10)
+  id = Integer(params[:id], 10)
+  part = Integer(params[:part], 10)
   plans.get(id, part).detach
   flash("/responses?id=#{tid}", "Thanks, plan ##{id} detached from the triple ##{tid}")
 end
 
 get '/causes' do
   offset = [Integer(params[:offset] || '0'), 0].max
-  limit = Integer(params[:limit] || '25')
+  limit = [Integer(params[:limit] || '25'), 1].max
   query = params[:q] || ''
   haml :causes, layout: :layout, locals: merged(
     title: '/causes',
@@ -179,7 +181,7 @@ end
 
 get '/risks' do
   offset = [Integer(params[:offset] || '0'), 0].max
-  limit = Integer(params[:limit] || '25')
+  limit = [Integer(params[:limit] || '25'), 1].max
   query = params[:q] || ''
   haml :risks, layout: :layout, locals: merged(
     title: '/risks',
@@ -193,7 +195,7 @@ end
 
 get '/effects' do
   offset = [Integer(params[:offset] || '0'), 0].max
-  limit = Integer(params[:limit] || '25')
+  limit = [Integer(params[:limit] || '25'), 1].max
   query = params[:q] || ''
   haml :effects, layout: :layout, locals: merged(
     title: '/effects',
@@ -207,7 +209,7 @@ end
 
 get '/plans' do
   offset = [Integer(params[:offset] || '0'), 0].max
-  limit = Integer(params[:limit] || '25')
+  limit = [Integer(params[:limit] || '25'), 1].max
   query = params[:q] || ''
   haml :plans, layout: :layout, locals: merged(
     title: '/plans',
@@ -347,7 +349,7 @@ module Rsk::App
 
   def cell(text)
     value = text.to_s
-    value.start_with?('=', '+', '-', '@') ? "'#{value}" : value
+    value.lstrip.start_with?('=', '+', '-', '@') ? "'#{value}" : value
   end
 
   def to_csv(filename, header, rows)

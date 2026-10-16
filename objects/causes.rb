@@ -15,18 +15,22 @@ class Rsk::Causes
   end
 
   def add(text)
-    @pgsql.transaction do |t|
-      id = Integer(
-        t.exec(
-          'INSERT INTO part (project, text, type) VALUES ($1, $2, $3) RETURNING id',
-          [@project, text, 'Cause']
-        )[0]['id']
-      )
-      t.exec('INSERT INTO cause (id) VALUES ($1)', [id])
-      id
-    end
+    id =
+      @pgsql.transaction do |t|
+        next if t.exec('SELECT id FROM part WHERE project = $1 AND text = $2', [@project, text]).any?
+        made = Integer(
+          t.exec(
+            'INSERT INTO part (project, text, type) VALUES ($1, $2, $3) RETURNING id',
+            [@project, text, 'Cause']
+          )[0]['id']
+        )
+        t.exec('INSERT INTO cause (id) VALUES ($1)', [made])
+        made
+      end
+    taken(text) if id.nil?
+    id
   rescue PG::UniqueViolation
-    raise(Rsk::Urror, "Cause \"#{text}\" already exists in this project")
+    taken(text)
   end
 
   def emojis
@@ -60,7 +64,7 @@ class Rsk::Causes
         id: Integer(r['id']),
         text: r['text'],
         emoji: r['emoji'],
-        rank: Integer(r['rank'] || 0),
+        rank: Float(r['rank'] || 0),
         risks: Integer(r['risks'])
       }
     end
@@ -68,12 +72,16 @@ class Rsk::Causes
 
   private
 
+  def taken(text)
+    raise(Rsk::Urror, "Cause \"#{text}\" already exists in this project")
+  end
+
   def query(query)
     Rsk::Query.new(
       @pgsql,
       [
         'SELECT cause.*, part.text,',
-        '  SUM(risk.probability * effect.impact) / COUNT(risk.id) AS rank,',
+        '  SUM(risk.probability * effect.impact)::NUMERIC / COUNT(risk.id) AS rank,',
         '  COUNT(risk.id) AS risks',
         'FROM cause',
         'JOIN part ON part.id = cause.id',
@@ -82,7 +90,7 @@ class Rsk::Causes
         'LEFT JOIN effect ON triple.effect = effect.id',
         'WHERE project = $1 AND (LOWER(text) LIKE $2 OR emoji LIKE $2)',
         'GROUP BY cause.id, part.id',
-        'ORDER BY rank DESC'
+        'ORDER BY rank DESC, part.id ASC'
       ],
       [@project, "%#{query.to_s.downcase.strip.gsub(/[\\%_]/, '\\\\\0')}%"]
     )

@@ -36,10 +36,10 @@ class Rsk::Plan
   end
 
   def reschedule(text, con: nil)
-    unless /^(daily|weekly|biweekly|monthly|quarterly|annually|\d{2}-\d{2}-\d{4})$/.match?(text)
+    unless /\A(daily|weekly|biweekly|monthly|quarterly|annually|\d{2}-\d{2}-\d{4})\z/.match?(text)
       raise(Rsk::Urror, "Schedule can either be a word or a date DD-MM-YYYY: #{text.inspect}")
     end
-    if /^\d{2}-\d{2}-\d{4}$/.match?(text)
+    if /\A\d{2}-\d{2}-\d{4}\z/.match?(text)
       begin
         Date.strptime(text, '%d-%m-%Y')
       rescue Date::Error
@@ -56,7 +56,9 @@ class Rsk::Plan
     if con.exec('SELECT * FROM part WHERE id = $1 AND project = $2', [@part, project]).empty?
       raise(Rsk::Urror, "##{@id} is not in your project ##{project}")
     end
-    con.exec('DELETE FROM plan WHERE id = $1 AND part = $2', [@id, @part])
+    if con.exec('DELETE FROM plan WHERE id = $1 AND part = $2 RETURNING id', [@id, @part]).empty?
+      raise(Rsk::Urror, "Plan ##{@id} is not attached to the part ##{@part}")
+    end
     return unless con.exec('SELECT * FROM plan WHERE id = $1', [@id]).empty?
     con.exec('DELETE FROM part WHERE id = $1', [@id])
   end

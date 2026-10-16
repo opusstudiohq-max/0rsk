@@ -15,18 +15,22 @@ class Rsk::Risks
   end
 
   def add(text)
-    @pgsql.transaction do |t|
-      id = Integer(
-        t.exec(
-          'INSERT INTO part (project, text, type) VALUES ($1, $2, $3) RETURNING id',
-          [@project, text, 'Risk']
-        )[0]['id']
-      )
-      t.exec('INSERT INTO risk (id) VALUES ($1)', [id])
-      id
-    end
+    id =
+      @pgsql.transaction do |t|
+        next if t.exec('SELECT id FROM part WHERE project = $1 AND text = $2', [@project, text]).any?
+        made = Integer(
+          t.exec(
+            'INSERT INTO part (project, text, type) VALUES ($1, $2, $3) RETURNING id',
+            [@project, text, 'Risk']
+          )[0]['id']
+        )
+        t.exec('INSERT INTO risk (id) VALUES ($1)', [made])
+        made
+      end
+    taken(text) if id.nil?
+    id
   rescue PG::UniqueViolation
-    raise(Rsk::Urror, "Risk \"#{text}\" already exists in this project")
+    taken(text)
   end
 
   def get(id)
@@ -47,7 +51,7 @@ class Rsk::Risks
         id: Integer(r['id']),
         text: r['text'],
         probability: Integer(r['probability']),
-        rank: Integer(r['rank'] || 0),
+        rank: Float(r['rank'] || 0),
         effects: Integer(r['effects'])
       }
     end
@@ -55,13 +59,17 @@ class Rsk::Risks
 
   private
 
+  def taken(text)
+    raise(Rsk::Urror, "Risk \"#{text}\" already exists in this project")
+  end
+
   def query(query)
     Rsk::Query.new(
       @pgsql,
       [
         'SELECT risk.*, part.text AS text,',
         '  SUM(effect.impact) AS impact,',
-        '  risk.probability * SUM(effect.impact) / COUNT(effect.id) AS rank,',
+        '  risk.probability * SUM(effect.impact)::NUMERIC / COUNT(effect.id) AS rank,',
         '  COUNT(effect.id) AS effects',
         'FROM risk',
         'JOIN part ON part.id = risk.id',
@@ -69,7 +77,7 @@ class Rsk::Risks
         'LEFT JOIN effect ON triple.effect = effect.id',
         'WHERE project = $1 AND LOWER(text) LIKE $2',
         'GROUP BY risk.id, part.id',
-        'ORDER BY rank DESC'
+        'ORDER BY rank DESC, part.id ASC'
       ],
       [@project, "%#{query.to_s.downcase.strip.gsub(/[\\%_]/, '\\\\\0')}%"]
     )

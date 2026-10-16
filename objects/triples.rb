@@ -8,6 +8,8 @@ require_relative 'rsk'
 require_relative 'urror'
 
 class Rsk::Triples
+  MAX_ID = 2_147_483_647
+
   def initialize(pgsql, project)
     @pgsql = pgsql
     @project = project
@@ -17,11 +19,12 @@ class Rsk::Triples
     @pgsql.transaction do |t|
       if Integer(
         t.exec(
-          'SELECT COUNT(*) FROM part WHERE id IN ($1, $2, $3) AND project = $4',
+          "SELECT COUNT(*) FROM part WHERE project = $4 AND ((id = $1 AND type = 'Cause') OR " \
+          "(id = $2 AND type = 'Risk') OR (id = $3 AND type = 'Effect'))",
           [cid, rid, eid, @project]
         )[0]['count']
       ) < 3
-        raise(Rsk::Urror, "Parts ##{cid}, ##{rid}, ##{eid} must all belong to project ##{@project}")
+        raise(Rsk::Urror, "Parts ##{cid}, ##{rid}, ##{eid} must be a cause, risk, and effect in project ##{@project}")
       end
       Integer(
         t.exec(
@@ -45,15 +48,9 @@ class Rsk::Triples
         raise(Rsk::Urror, "Triple ##{id} is not in your project ##{@project}")
       end
       t.exec('DELETE FROM triple WHERE id = $1', [id])
-      if t.exec('SELECT * FROM triple WHERE cause = $1', [triple[:cid]]).empty?
-        t.exec('DELETE FROM part WHERE id = $1', [triple[:cid]])
-      end
-      if t.exec('SELECT * FROM triple WHERE risk = $1', [triple[:rid]]).empty?
-        t.exec('DELETE FROM part WHERE id = $1', [triple[:rid]])
-      end
-      if t.exec('SELECT * FROM triple WHERE effect = $1', [triple[:eid]]).empty?
-        t.exec('DELETE FROM part WHERE id = $1', [triple[:eid]])
-      end
+      forget(t, triple[:cid]) if t.exec('SELECT * FROM triple WHERE cause = $1', [triple[:cid]]).empty?
+      forget(t, triple[:rid]) if t.exec('SELECT * FROM triple WHERE risk = $1', [triple[:rid]]).empty?
+      forget(t, triple[:eid]) if t.exec('SELECT * FROM triple WHERE effect = $1', [triple[:eid]]).empty?
     end
   end
 
@@ -85,9 +82,15 @@ class Rsk::Triples
 
   private
 
+  def forget(con, part)
+    con.exec('DELETE FROM part WHERE id IN (SELECT id FROM plan WHERE part = $1)', [part])
+    con.exec('DELETE FROM part WHERE id = $1', [part])
+  end
+
   def query(id, query)
     where = []
     words = []
+    numbers = []
     unless id.positive?
       query.strip.downcase.split.each do |w|
         if w.start_with?('+')
@@ -95,7 +98,10 @@ class Rsk::Triples
             where << 'plan.id IS NULL'
           elsif /^\+[0-9]+$/.match?(w)
             p = Integer(w[1..])
-            where << "t.cause = #{p} OR t.risk = #{p} OR t.effect = #{p}"
+            raise(Rsk::Urror, "The number in #{w.inspect} is too big") if p > MAX_ID
+            numbers << p
+            pos = numbers.size + 2
+            where << "t.cause = $#{pos} OR t.risk = $#{pos} OR t.effect = $#{pos}"
           else
             raise(Rsk::Urror, "Can't understand query operator #{w.inspect}")
           end
@@ -113,8 +119,13 @@ class Rsk::Triples
         '  risk.probability AS probability, effect.impact AS impact,',
         '  cpart.text AS ctext, rpart.text AS rtext, epart.text AS etext,',
         '  (probability * impact) AS rank,',
-        '  JSONB_AGG(JSONB_BUILD_OBJECT(\'id\', ppart.id, \'text\', ppart.text || \' (\' || plan.schedule || \')\'))',
-        '    OVER (PARTITION BY t.id) AS plans',
+        '  COALESCE((',
+        '    SELECT JSONB_AGG(JSONB_BUILD_OBJECT(',
+        '      \'id\', apart.id, \'text\', apart.text || \' (\' || a.schedule || \')\'',
+        '    ))',
+        '    FROM plan a JOIN part AS apart ON a.id = apart.id',
+        '    WHERE a.part = t.cause OR a.part = t.risk OR a.part = t.effect',
+        '  ), \'[]\'::JSONB) AS plans',
         'FROM triple t',
         'JOIN cause ON cause.id = t.cause',
         'JOIN part AS cpart ON cause.id = cpart.id',
@@ -137,7 +148,7 @@ class Rsk::Triples
         where.empty? ? '' : "AND (#{where.join(') AND (')})",
         'ORDER BY rank DESC, t.created DESC'
       ],
-      [@project, id.positive? ? id : "%#{words.join(' ').gsub(/[\\%_]/, '\\\\\0')}%"]
+      [@project, id.positive? ? id : "%#{words.join(' ').gsub(/[\\%_]/, '\\\\\0')}%"] + numbers
     )
   end
 end

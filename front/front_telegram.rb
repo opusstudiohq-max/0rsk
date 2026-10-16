@@ -6,13 +6,16 @@
 require 'telebot'
 require_relative '../objects/daemon'
 require_relative '../objects/markdown'
+require_relative '../objects/projects'
 require_relative '../objects/telechats'
 require_relative '../objects/telepings'
 require_relative '../objects/trimmed'
+require_relative '../objects/triples'
 require_relative '../objects/urror'
 
 get '/telegram' do
-  haml :telegram, layout: :layout, locals: merged(title: '/telegram', token: params[:token].to_s)
+  token = params[:token].to_s
+  haml(:telegram, layout: :layout, locals: merged(title: '/telegram', token:, chat: telechats.invited(token)))
 end
 
 post '/telegram' do
@@ -37,7 +40,6 @@ module Rsk::Telegram
 
   def telepost(msg, chat = telechats.chat(identity), reply_markup: nil)
     return unless settings.config['telegram']
-    telechats.posted(msg, chat)
     telebot.send_message(
       chat_id: chat,
       parse_mode: 'Markdown',
@@ -45,11 +47,12 @@ module Rsk::Telegram
       text: Rsk::Trimmed.new(msg, 4000).to_s,
       reply_markup: reply_markup
     )
+    telechats.posted(msg, chat)
   end
 
   def reply(msg, login)
     case msg
-    when %r{^/done$}
+    when %r{\A/done(?:@\w+)?\s*\z}i
       left = tasks(login: login).fetch(limit: 100)
       if left.empty?
         ['There are no tasks in your agenda, nothing to complete.']
@@ -67,13 +70,13 @@ module Rsk::Telegram
               index: i,
               text: "/done #{t[:id]}"
             }
-          end.group_by { |x| (x[:index] / 4).round }.values,
+          end.group_by { |x| x[:index] / 4 }.values,
           one_time_keyboard: true,
           resize_keyboard: true
         }
       end
-    when %r{^/done [0-9]+$}
-      id = Integer(msg.split[1])
+    when %r{\A/done(?:@\w+)?\s+(?<id>[0-9]+)\s*\z}i
+      id = Integer(Regexp.last_match[:id])
       tasks(login: login).done(id)
       left = tasks(login: login).fetch
       [
@@ -82,7 +85,7 @@ module Rsk::Telegram
           'Your agenda is empty, good job!' :
           "There are still #{left.count} tasks in your agenda. Say /tasks to see them all."
       ]
-    when %r{^/tasks$}
+    when %r{\A/tasks(?:@\w+)?\s*\z}i
       list = tasks(login: login).fetch(limit: 100)
       if list.empty?
         ['There are no tasks in your agenda, good job!']
@@ -95,6 +98,19 @@ module Rsk::Telegram
         'In this chat I inform you about the most important tasks you have in your agenda',
         'in [0rsk.com](https://www.0rsk.com).'
       ]
+    end
+  end
+
+  def incoming(message)
+    return if message.nil?
+    chat = message.chat.id
+    if telechats.exists?(chat)
+      dispatch(chat, message)
+    else
+      telepost(
+        "[Click here](https://www.0rsk.com/telegram?token=#{telechats.invite(chat)}) to identify yourself.",
+        chat
+      )
     end
   end
 
@@ -214,31 +230,23 @@ module Rsk::Telegram
 end
 Object.include(Rsk::Telegram)
 
-if settings.config['telegram']
+if settings.config['telegram'] && settings.role.daemons?
   Rsk::Daemon.new.start do
     Telebot::Bot.new(settings.config['telegram']['token']).run do |_, message|
-      chat = message.chat.id
-      if telechats.exists?(chat)
-        dispatch(chat, message)
-      else
-        telepost(
-          "[Click here](https://www.0rsk.com/telegram?token=#{telechats.invite(chat)}) to identify yourself.",
-          chat
-        )
-      end
+      incoming(message)
     end
   rescue Net::ReadTimeout => e
     settings.log.error(e.message)
   end
 end
 
-if settings.config['telegram']
+if settings.config['telegram'] && settings.role.daemons?
   Rsk::Daemon.new(10).start do
     broadcast
   end
 end
 
-if settings.config['telegram']
+if settings.config['telegram'] && settings.role.daemons?
   Rsk::Daemon.new(1440).start do
     alone
   end
